@@ -50,6 +50,7 @@ TableIt is a system for restaurants to organise their seating plan and their ord
 | `src/TableItWeb/Services` | `ServiceDay`, which works out when "tonight" starts |
 | `src/TableItWeb/Pages` | Razor pages: `Staff`, `Kitchen` (orders), `Kitchen/Planner` and `Kitchen/Menu` |
 | `src/TableItWeb/wwwroot/js` | Page scripts. `api.js` holds the shared fetch and SignalR helpers |
+| `tests/TableItWeb.Tests` | xUnit tests: controller unit tests (in-memory SQLite and a fake SignalR hub) and HTTP/SignalR integration tests |
 
 ### API
 
@@ -74,6 +75,14 @@ dotnet run --project src/TableItWeb --launch-profile http
 Then open `http://localhost:5269`. From a phone on the same network, use `http://<your-computer's-IP>:5269/Staff`.
 
 The SQLite database (`tableit.db`) is created automatically. Delete it to reset the data or after changing the models; there are no migrations yet.
+
+## Running the tests
+
+```bash
+dotnet test TableIt.sln
+```
+
+The tests cover placing orders and their validation, the order status flow, the "tonight" filter (05:00 cutoff), saving the floor plan, the menu editor, the seed data, and the JSON/SignalR contract the pages depend on. Each test uses its own database, so nothing touches `tableit.db`.
 
 ## Not yet implemented
 
