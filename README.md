@@ -15,6 +15,31 @@ TableIt is a system for restaurants to organise their seating plan and their ord
   - **Floor planner.** A graphical editor for placing the restaurant's tables and setting how many seats each table has.
 - **Menu editor.** The kitchen maintains the menu items that staff pick from when they take an order.
 
+### Floor staff: `/Staff`
+
+| Tables | Taking an order | A table's orders |
+|---|---|---|
+| ![Grid of tables with badges showing open orders](docs/images/staff-tables.jpg) | ![Order builder with menu items grouped by category and a running total](docs/images/staff-order.jpg) | ![Table 2 with a ready order and a Mark served button](docs/images/staff-table.jpg) |
+| Each table shows its seat count. The badge counts open orders, coloured by the most urgent status (green means food is ready). | Tap items to add them. The menu stays in place, and the draft, notes and total sit in the bottom bar. | Tonight's orders for the table and their status. Ready orders can be marked as served. |
+
+### Kitchen: order display, `/Kitchen`
+
+![Kitchen display with New, In progress and Ready columns](docs/images/kitchen.jpg)
+
+Orders flow left to right: **New** → **In progress** → **Ready**. Each card shows the table, the items, line notes and order notes. Its timer turns yellow after 15 minutes and red after 25. New orders appear instantly, with an optional chime.
+
+### Kitchen: floor planner, `/Kitchen/Planner`
+
+![Floor planner with round and rectangular tables and their seats](docs/images/planner.jpg)
+
+Drag tables to place them, and set the number, seats, shape, size and rotation in the side panel. The seats are drawn around each table.
+
+### Kitchen: menu editor, `/Kitchen/Menu`
+
+![Menu editor listing items by category with availability switches](docs/images/menu.jpg)
+
+Add, edit and delete menu items. The availability switch hides an item from the staff order screen right away.
+
 ## Architecture
 
 ```
