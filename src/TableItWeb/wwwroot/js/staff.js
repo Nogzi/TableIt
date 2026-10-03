@@ -36,6 +36,25 @@
     function draftTotal() {
         return draft.lines.reduce(function (s, l) { const m = menuById(l.menuItemId); return s + (m ? m.price * l.quantity : 0); }, 0);
     }
+    const PENCIL = '<svg class="st-pencil" width="16" height="16" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M12.146.146a.5.5 0 0 1 .708 0l3 3a.5.5 0 0 1 0 .708l-10 10a.5.5 0 0 1-.168.11l-5 2a.5.5 0 0 1-.65-.65l2-5a.5.5 0 0 1 .11-.168l10-10zM11.207 2.5 13.5 4.793 14.793 3.5 12.5 1.207 11.207 2.5zm1.586 3L10.5 3.207 4 9.707V10h.5a.5.5 0 0 1 .5.5v.5h.5a.5.5 0 0 1 .5.5v.5h.293l6.5-6.5zm-9.761 5.175-.106.106-1.528 3.821 3.821-1.528.106-.106A.5.5 0 0 1 5 12.5V12h-.5a.5.5 0 0 1-.5-.5V11h-.5a.5.5 0 0 1-.468-.325z"/></svg>';
+    function noteCount() {
+        return (draft.note.trim() ? 1 : 0) + draft.lines.filter(function (l) { return (l.note || '').trim(); }).length;
+    }
+    function noteIndHtml() {
+        const n = noteCount();
+        return n ? PENCIL + ' ' + n + ' note' + (n === 1 ? '' : 's') : '';
+    }
+    function orderNoteLabel() {
+        const n = draft.note.trim();
+        return n ? 'Note: ' + n : 'Add order note';
+    }
+    // Update note-related UI in place (no re-render, so inputs keep focus and caret).
+    function updateNoteUi() {
+        const ind = document.getElementById('st-notes-ind');
+        if (ind) ind.innerHTML = noteIndHtml();
+        const lbl = document.getElementById('st-ordernote-lbl');
+        if (lbl) lbl.textContent = orderNoteLabel();
+    }
     function draftCount() { return draft.lines.reduce(function (s, l) { return s + l.quantity; }, 0); }
 
     function route() {
@@ -129,13 +148,23 @@
 
         let html = '<div class="st-top"><button class="btn btn-outline-secondary st-back" data-act="builder-back" aria-label="Back">&larr;</button>' +
             '<h1>New order &middot; Table ' + esc(t.number) + '</h1>' + connDot() + '</div>';
+        html += '<button class="btn btn-outline-primary st-notebtn" data-act="order-note">' + PENCIL +
+            '<span class="st-ellip" id="st-ordernote-lbl">' + esc(orderNoteLabel()) + '</span></button>';
         if (!avail.length) html += '<p class="text-muted">No items available.</p>';
         sortCats(cats).forEach(function (c) {
             html += '<h3 class="st-cat">' + esc(c) + '</h3>';
             avail.filter(function (m) { return m.category === c; }).forEach(function (m) {
                 const q = qtyOf(m.id);
-                html += '<button class="st-item' + (flashId === m.id ? ' flash' : '') + '" data-act="add" data-id="' + m.id + '"><span>' + esc(m.name) +
-                    (q ? ' <span class="badge rounded-pill bg-primary">&times;' + q + '</span>' : '') + '</span><strong>' + esc(T.formatPrice(m.price)) + '</strong></button>';
+                // Badge and chip slots are always rendered (hidden when not in draft) so row height never changes on add.
+                let last = null;
+                draft.lines.forEach(function (l) { if (l.menuItemId === m.id) last = l; });
+                const hid = q ? '' : ' st-hidden';
+                html += '<div class="st-item' + (flashId === m.id ? ' flash' : '') + '" role="button" tabindex="0" data-act="add" data-id="' + m.id + '">' +
+                    '<span class="st-item-name">' + esc(m.name) + '</span>' +
+                    '<span class="st-item-side"><span class="st-slot' + hid + '"><span class="badge rounded-pill bg-primary">&times;' + q + '</span>' +
+                    '<button type="button" class="st-chip' + (last && last.note ? ' filled' : '') + '" data-act="item-note" data-id="' + m.id + '"' + (q ? '' : ' tabindex="-1"') +
+                    ' aria-label="Note for ' + esc(m.name) + '">' + PENCIL + 'Note</button></span>' +
+                    '<strong class="st-price">' + esc(T.formatPrice(m.price)) + '</strong></span></div>';
             });
         });
         flashId = null;
@@ -155,15 +184,17 @@
                 if (l.noteOpen || l.note) {
                     html += '<input type="text" class="form-control mt-1" maxlength="200" placeholder="Line note (e.g. no onions)" data-line-note="' + i + '" value="' + esc(l.note) + '">';
                 } else {
-                    html += '<button class="btn btn-link btn-sm p-0" data-act="line-note" data-i="' + i + '">+ note</button>';
+                    html += '<button class="btn btn-outline-secondary btn-sm st-addnote" data-act="line-note" data-i="' + i + '">' + PENCIL + 'Add note</button>';
                 }
                 html += '</div>';
             });
-            html += '<textarea class="form-control mt-2" rows="2" maxlength="500" placeholder="Order note (optional)" id="st-order-note">' + esc(draft.note) + '</textarea></div>';
+            html += '<label class="form-label fw-semibold mt-2 mb-1" for="st-order-note">Order note (for the kitchen)</label>' +
+                '<textarea class="form-control" rows="2" maxlength="500" placeholder="Order note (optional)" id="st-order-note">' + esc(draft.note) + '</textarea></div>';
         }
-        html += '<div class="st-bar-in"><button class="sum st-sum" data-act="toggle-sheet" aria-expanded="' + sheetOpen + '">' +
-            '<div>' + count + ' item' + (count === 1 ? '' : 's') + ' ' + (sheetOpen ? '&#9662;' : '&#9652;') + '</div>' +
-            '<strong>' + esc(T.formatPrice(draftTotal())) + '</strong></button>' +
+        html += '<div class="st-bar-in"><button class="btn btn-outline-primary st-toggle" data-act="toggle-sheet" aria-expanded="' + sheetOpen + '">' +
+            (sheetOpen ? 'Hide order &#9662;' : 'Review order (' + count + ') &#9652;') + '</button>' +
+            '<div class="sum"><strong>' + esc(T.formatPrice(draftTotal())) + '</strong>' +
+            '<div class="st-notes-ind" id="st-notes-ind">' + noteIndHtml() + '</div></div>' +
             '<button class="btn btn-success" data-act="send"' + (count === 0 || sending ? ' disabled' : '') + '>' +
             (sending ? '<span class="spinner-border spinner-border-sm me-1"></span>Sending' : 'Send') + '</button></div></div>';
         root.innerHTML = html;
@@ -241,6 +272,19 @@
                 const inp = root.querySelector('[data-line-note="' + i + '"]'); if (inp) inp.focus();
                 break;
             }
+            case 'order-note': {
+                sheetOpen = true; renderKeepScroll();
+                const ta = document.getElementById('st-order-note'); if (ta) ta.focus();
+                break;
+            }
+            case 'item-note': {
+                let idx = -1;
+                draft.lines.forEach(function (l, k) { if (l.menuItemId === id) idx = k; });
+                if (idx < 0) break;
+                draft.lines[idx].noteOpen = true; sheetOpen = true; renderKeepScroll();
+                const inp = root.querySelector('[data-line-note="' + idx + '"]'); if (inp) inp.focus();
+                break;
+            }
             case 'toggle-sheet': sheetOpen = !sheetOpen; renderKeepScroll(); break;
             case 'send': send(); break;
         }
@@ -250,6 +294,15 @@
         const t = ev.target;
         if (t.id === 'st-order-note') draft.note = t.value;
         else if (t.dataset.lineNote !== undefined) draft.lines[+t.dataset.lineNote].note = t.value;
+        else return;
+        updateNoteUi();
+    });
+
+    root.addEventListener('keydown', function (ev) {
+        const t = ev.target;
+        if ((ev.key === 'Enter' || ev.key === ' ') && t.classList && t.classList.contains('st-item')) {
+            ev.preventDefault(); addToDraft(+t.dataset.id);
+        }
     });
 
     window.addEventListener('hashchange', function () {
