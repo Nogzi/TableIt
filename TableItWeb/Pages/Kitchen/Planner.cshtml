@@ -1,0 +1,120 @@
+@page
+@model TableItWeb.Pages.Kitchen.PlannerModel
+@{
+    ViewData["Title"] = "Floor planner";
+    ViewData["FullWidth"] = true;
+    ViewData["HideFooter"] = true;
+}
+
+@section Styles {
+<style>
+    .planner-canvas-wrap { background: #fff; border: 1px solid var(--bs-border-color, #dee2e6); border-radius: .5rem; overflow: hidden; }
+    #planner-svg { display: block; width: 100%; height: auto; touch-action: none; user-select: none; -webkit-user-select: none; background: #fdfdfb; }
+    #planner-svg .table-group { cursor: grab; }
+    #planner-svg .table-group.dragging { cursor: grabbing; }
+    #planner-svg .t-shape { fill: #f4e7d3; stroke: #8a6d3b; stroke-width: 2; }
+    #planner-svg .t-seat { fill: #cfd8dc; stroke: #607d8b; stroke-width: 1.5; }
+    #planner-svg .t-num { font-size: 30px; font-weight: 700; fill: #3b2f1c; text-anchor: middle; dominant-baseline: central; pointer-events: none; }
+    #planner-svg .t-sel { fill: none; stroke: #0d6efd; stroke-width: 3; stroke-dasharray: 8 5; pointer-events: none; }
+    #planner-svg .t-hit { fill: transparent; }
+    #planner-svg .table-group.selected .t-shape { fill: #e3efff; stroke: #0d6efd; }
+    .planner-toast-area { position: fixed; bottom: 1rem; right: 1rem; z-index: 1080; max-width: 22rem; }
+    .planner-panel { min-width: 0; }
+    @@media (min-width: 992px) {
+        .planner-layout { display: flex; gap: 1rem; align-items: flex-start; }
+        .planner-layout .planner-main { flex: 1 1 auto; min-width: 0; }
+        .planner-layout .planner-panel { flex: 0 0 300px; }
+    }
+    @@media (max-width: 991.98px) { .planner-panel { margin-top: 1rem; } }
+</style>
+}
+
+<div class="d-flex flex-wrap align-items-center gap-2 mb-2">
+    <h1 class="h4 mb-0 me-2">Floor planner</h1>
+    <button type="button" id="btn-add-round" class="btn btn-outline-primary btn-sm">+ Round table</button>
+    <button type="button" id="btn-add-rect" class="btn btn-outline-primary btn-sm">+ Rectangular table</button>
+    <button type="button" id="btn-duplicate" class="btn btn-outline-secondary btn-sm" disabled>Duplicate</button>
+    <button type="button" id="btn-delete" class="btn btn-outline-danger btn-sm" disabled>Delete</button>
+    <button type="button" id="btn-save" class="btn btn-success btn-sm">Save</button>
+    <span id="dirty-indicator" class="badge text-bg-warning d-none">Unsaved changes</span>
+    <span class="ms-auto text-muted small">Tables: <strong id="total-tables">0</strong> &middot; Total seats: <strong id="total-seats">0</strong></span>
+</div>
+
+<div id="remote-notice" class="alert alert-info d-none py-2 d-flex align-items-center gap-2" role="alert">
+    <span>Layout changed elsewhere &ndash;</span>
+    <button type="button" id="btn-reload" class="btn btn-sm btn-info">Reload</button>
+</div>
+<div id="load-error" class="alert alert-danger d-none" role="alert"></div>
+
+<div class="planner-layout">
+    <div class="planner-main">
+        <div class="planner-canvas-wrap">
+            <svg id="planner-svg" viewBox="0 0 1000 700" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Floor plan">
+                <defs>
+                    <pattern id="grid-pattern" width="25" height="25" patternUnits="userSpaceOnUse">
+                        <path d="M 25 0 L 0 0 0 25" fill="none" stroke="#e6e8eb" stroke-width="1" />
+                    </pattern>
+                </defs>
+                <rect id="bg" x="0" y="0" width="1000" height="700" fill="url(#grid-pattern)" />
+                <rect x="1.5" y="1.5" width="997" height="697" fill="none" stroke="#495057" stroke-width="3" />
+                <g id="tables-layer"></g>
+            </svg>
+        </div>
+        <div class="text-muted small mt-1">Drag tables to move them (snaps to grid). Click empty space to deselect. Delete key removes the selected table.</div>
+    </div>
+
+    <div class="planner-panel">
+        <div class="card">
+            <div class="card-header">Selected table</div>
+            <div class="card-body">
+                <div id="panel-empty" class="text-muted">Select a table to edit it, or add a new one.</div>
+                <form id="panel-form" class="d-none" autocomplete="off" novalidate>
+                    <div class="mb-2">
+                        <label class="form-label mb-0" for="f-number">Number</label>
+                        <input type="number" class="form-control" id="f-number" min="1" step="1" />
+                        <div class="invalid-feedback" id="f-number-err"></div>
+                    </div>
+                    <div class="mb-2">
+                        <label class="form-label mb-0" for="f-seats">Seats (1&ndash;20)</label>
+                        <input type="number" class="form-control" id="f-seats" min="1" max="20" step="1" />
+                        <div class="invalid-feedback">Seats must be 1 to 20.</div>
+                    </div>
+                    <div class="mb-2">
+                        <label class="form-label mb-0" for="f-shape">Shape</label>
+                        <select class="form-select" id="f-shape">
+                            <option value="Round">Round</option>
+                            <option value="Rect">Rect</option>
+                        </select>
+                    </div>
+                    <div class="row g-2 mb-2">
+                        <div class="col">
+                            <label class="form-label mb-0" for="f-width">Width</label>
+                            <input type="number" class="form-control" id="f-width" min="40" max="400" step="5" />
+                            <div class="invalid-feedback">40 to 400.</div>
+                        </div>
+                        <div class="col">
+                            <label class="form-label mb-0" for="f-height">Height</label>
+                            <input type="number" class="form-control" id="f-height" min="40" max="400" step="5" />
+                            <div class="invalid-feedback">40 to 400.</div>
+                        </div>
+                    </div>
+                    <div class="mb-2">
+                        <label class="form-label mb-0" for="f-rotation">Rotation (degrees)</label>
+                        <input type="number" class="form-control" id="f-rotation" step="15" list="rotation-list" />
+                        <datalist id="rotation-list">
+                            <option value="0"></option><option value="45"></option><option value="90"></option>
+                            <option value="135"></option><option value="180"></option><option value="225"></option>
+                            <option value="270"></option><option value="315"></option>
+                        </datalist>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="planner-toast-area" id="toast-area"></div>
+
+@section Scripts {
+    <script src="~/js/planner.js" asp-append-version="true"></script>
+}

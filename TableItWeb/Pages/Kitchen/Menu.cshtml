@@ -1,0 +1,80 @@
+@page
+@model TableItWeb.Pages.Kitchen.MenuModel
+@{
+    ViewData["Title"] = "Menu";
+    ViewData["FullWidth"] = true;
+    ViewData["HideFooter"] = true;
+}
+
+@section Styles {
+<style>
+    .menu-row { display: flex; flex-wrap: wrap; align-items: center; gap: .5rem 1rem; padding: .75rem 1rem; border-bottom: 1px solid #dee2e6; }
+    .menu-row:last-child { border-bottom: 0; }
+    .menu-row .col-name { flex: 1 1 200px; min-width: 0; overflow-wrap: anywhere; }
+    .menu-row .col-desc { flex: 3 1 240px; min-width: 0; overflow-wrap: anywhere; color: #6c757d; }
+    .menu-row .col-price { flex: 0 0 90px; text-align: right; font-weight: 600; white-space: nowrap; }
+    .menu-row .col-avail { flex: 0 0 auto; }
+    .menu-row .col-actions { flex: 0 0 auto; white-space: nowrap; }
+    .menu-row.unavailable .col-name, .menu-row.unavailable .col-desc, .menu-row.unavailable .col-price { opacity: .55; }
+    .menu-row .form-check-input { width: 3em; height: 1.5em; cursor: pointer; }
+    #menuList { overflow-x: hidden; }
+    @@media (max-width: 575.98px) {
+        .menu-row .col-price { text-align: left; flex: 1 1 auto; }
+        .menu-row .col-desc { flex-basis: 100%; }
+    }
+</style>
+}
+
+<div class="d-flex flex-wrap align-items-center gap-2 mb-3">
+    <h1 class="h3 mb-0 me-auto">Menu</h1>
+    <input type="search" id="menuSearch" class="form-control" style="max-width:280px" placeholder="Search name or description" aria-label="Search menu">
+    <button type="button" id="addItemBtn" class="btn btn-primary">Add item</button>
+</div>
+
+<div id="menuAlert" class="alert alert-danger d-none" role="alert"></div>
+<div id="menuList"><div class="text-muted">Loading...</div></div>
+
+<div class="modal fade" id="itemModal" tabindex="-1" aria-labelledby="itemModalTitle" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-scrollable">
+        <form class="modal-content" id="itemForm" novalidate>
+            <div class="modal-header">
+                <h2 class="modal-title h5" id="itemModalTitle">Add item</h2>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <div class="modal-body">
+                <div id="formError" class="alert alert-danger d-none" role="alert"></div>
+                <div class="mb-3">
+                    <label for="fName" class="form-label">Name</label>
+                    <input type="text" id="fName" class="form-control" required maxlength="200">
+                    <div class="invalid-feedback">Name is required.</div>
+                </div>
+                <div class="mb-3">
+                    <label for="fCategory" class="form-label">Category</label>
+                    <input type="text" id="fCategory" class="form-control" list="categoryList" maxlength="100" autocomplete="off">
+                    <datalist id="categoryList"></datalist>
+                </div>
+                <div class="mb-3">
+                    <label for="fPrice" class="form-label">Price (DKK)</label>
+                    <input type="number" id="fPrice" class="form-control" step="0.5" min="0" required inputmode="decimal">
+                    <div class="invalid-feedback">Enter a price of 0 or more.</div>
+                </div>
+                <div class="mb-3">
+                    <label for="fDescription" class="form-label">Description</label>
+                    <textarea id="fDescription" class="form-control" rows="3"></textarea>
+                </div>
+                <div class="form-check form-switch">
+                    <input class="form-check-input" type="checkbox" role="switch" id="fAvailable" checked>
+                    <label class="form-check-label" for="fAvailable">Available</label>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Cancel</button>
+                <button type="submit" class="btn btn-primary" id="saveBtn">Save</button>
+            </div>
+        </form>
+    </div>
+</div>
+
+@section Scripts {
+<script src="~/js/menu.js" asp-append-version="true"></script>
+}
