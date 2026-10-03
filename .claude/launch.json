@@ -4,7 +4,7 @@
     {
       "name": "tableit-web",
       "runtimeExecutable": "dotnet",
-      "runtimeArgs": ["run", "--project", "TableItWeb", "--launch-profile", "http"],
+      "runtimeArgs": ["run", "--project", "src/TableItWeb", "--launch-profile", "http"],
       "port": 5269
     }
   ]
