@@ -17,10 +17,13 @@ TableIt is a system for restaurants to organise their seating plan and their ord
 
 ### Floor staff: `/Staff`
 
-| Tables | Taking an order | A table's orders |
-|---|---|---|
-| ![Grid of tables with badges showing open orders](docs/images/staff-tables.jpg) | ![Order builder with menu items grouped by category and a running total](docs/images/staff-order.jpg) | ![Table 2 with a ready order and a Mark served button](docs/images/staff-table.jpg) |
-| Each table shows its seat count. The badge counts open orders, coloured by the most urgent status (green means food is ready). | Tap items to add them. The menu stays in place, and the draft, notes and total sit in the bottom bar. | Tonight's orders for the table and their status. Ready orders can be marked as served. |
+| Tables | Taking an order |
+|---|---|
+| ![Grid of tables with badges showing open orders](docs/images/staff-tables.jpg) | ![Order builder with menu items grouped by category, quantity badges and Note buttons](docs/images/staff-order.jpg) |
+| Each table shows its seat count. The badge counts open orders, coloured by the most urgent status (green means food is ready). | Tap items to add them. The menu stays in place as you add. Items in the order show a quantity badge and a **Note** button. |
+| **Adding notes** | **A table's orders** |
+| ![Order sheet with an item note and an order note for the kitchen](docs/images/staff-notes.jpg) | ![Table 2 with a ready order and a Mark served button](docs/images/staff-table.jpg) |
+| Notes can go on a single item ("one without onions") or on the whole order ("Allergy: nuts"). Both appear on the kitchen card. Open the order sheet with **Review order** to change quantities and notes. | Tonight's orders for the table and their status. Ready orders can be marked as served. |
 
 ### Kitchen: order display, `/Kitchen`
 
