@@ -1,0 +1,53 @@
+@page
+@model IndexModel
+@{
+    ViewData["Title"] = "Home";
+}
+
+<div class="text-center mb-4">
+    <h1 class="display-4">TableIt</h1>
+    <p class="lead text-muted">Restaurant ordering made simple.</p>
+</div>
+
+<div class="row g-4">
+    <div class="col-12 col-md-6">
+        <a href="/Staff" class="text-decoration-none">
+            <div class="card h-100 shadow-sm">
+                <div class="card-body p-5 text-center">
+                    <h2 class="card-title">Staff</h2>
+                    <p class="card-text text-muted fs-5">Take orders at tables, for phones</p>
+                </div>
+            </div>
+        </a>
+    </div>
+    <div class="col-12 col-md-6">
+        <a href="/Kitchen" class="text-decoration-none">
+            <div class="card h-100 shadow-sm">
+                <div class="card-body p-5 text-center">
+                    <h2 class="card-title">Kitchen display</h2>
+                    <p class="card-text text-muted fs-5">See incoming orders and update their status</p>
+                </div>
+            </div>
+        </a>
+    </div>
+    <div class="col-12 col-md-6">
+        <a href="/Kitchen/Planner" class="text-decoration-none">
+            <div class="card h-100 shadow-sm">
+                <div class="card-body p-5 text-center">
+                    <h2 class="card-title">Floor planner</h2>
+                    <p class="card-text text-muted fs-5">Arrange tables on the floor plan</p>
+                </div>
+            </div>
+        </a>
+    </div>
+    <div class="col-12 col-md-6">
+        <a href="/Kitchen/Menu" class="text-decoration-none">
+            <div class="card h-100 shadow-sm">
+                <div class="card-body p-5 text-center">
+                    <h2 class="card-title">Menu editor</h2>
+                    <p class="card-text text-muted fs-5">Edit dishes, prices and availability</p>
+                </div>
+            </div>
+        </a>
+    </div>
+</div>

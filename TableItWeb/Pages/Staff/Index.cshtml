@@ -1,0 +1,69 @@
+@page
+@model TableItWeb.Pages.Staff.StaffIndexModel
+@{
+    ViewData["Title"] = "Staff";
+    ViewData["FullWidth"] = true;
+    ViewData["HideFooter"] = true;
+}
+
+@section Styles {
+<style>
+    #staff-app { max-width: 640px; margin: 0 auto; padding-bottom: 7rem; }
+    .st-top { display: flex; align-items: center; gap: .5rem; min-height: 3rem; }
+    .st-top h1 { font-size: 1.4rem; margin: 0; flex: 1; }
+    .st-conn { display: inline-block; width: .8rem; height: .8rem; border-radius: 50%; background: #adb5bd; }
+    .st-conn.connected { background: #198754; }
+    .st-conn.reconnecting { background: #ffc107; }
+    .st-conn.disconnected { background: #dc3545; }
+    .st-back { min-width: 3rem; min-height: 3rem; font-size: 1.3rem; }
+    .st-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: .75rem; }
+    @@media (min-width: 480px) { .st-grid { grid-template-columns: repeat(3, 1fr); } }
+    .st-table { position: relative; min-height: 6.5rem; border: 2px solid #ced4da; border-radius: .75rem; background: #fff; text-align: center; padding: .5rem; }
+    .st-table:active { background: #e9ecef; }
+    .st-table .num { font-size: 2rem; font-weight: 700; line-height: 1.1; display: block; }
+    .st-table .seats { color: #6c757d; font-size: .85rem; }
+    .st-table .badge { position: absolute; top: .4rem; right: .4rem; font-size: .9rem; }
+    .st-badge-Ready { background: #198754; color: #fff; animation: st-pulse 1.2s infinite; }
+    .st-badge-InProgress { background: #ffc107; color: #000; }
+    .st-badge-New { background: #0d6efd; color: #fff; }
+    .st-table.has-Ready { border-color: #198754; }
+    @@keyframes st-pulse { 0% { box-shadow: 0 0 0 0 rgba(25,135,84,.7); } 70% { box-shadow: 0 0 0 .6rem rgba(25,135,84,0); } 100% { box-shadow: 0 0 0 0 rgba(25,135,84,0); } }
+    .st-pill { font-size: .8rem; padding: .25rem .6rem; border-radius: 1rem; font-weight: 600; color: #fff; }
+    .st-pill-New { background: #0d6efd; }
+    .st-pill-InProgress { background: #ffc107; color: #000; }
+    .st-pill-Ready { background: #198754; }
+    .st-pill-Served { background: #6c757d; }
+    .st-pill-Cancelled { background: #dc3545; }
+    .st-order { border: 1px solid #dee2e6; border-radius: .6rem; background: #fff; padding: .75rem; margin-bottom: .6rem; }
+    .st-order.Ready { border-color: #198754; border-width: 2px; }
+    .st-order.Served, .st-order.Cancelled { opacity: .65; }
+    .st-note { color: #6c757d; font-size: .85rem; font-style: italic; }
+    .st-cat { font-size: .85rem; text-transform: uppercase; letter-spacing: .05em; color: #6c757d; margin: 1rem 0 .3rem; }
+    .st-item { display: flex; justify-content: space-between; align-items: center; width: 100%; min-height: 3.2rem; padding: .5rem .75rem; border: 1px solid #dee2e6; border-radius: .5rem; background: #fff; margin-bottom: .35rem; text-align: left; }
+    .st-item:active { background: #e9ecef; }
+    .st-line { border-bottom: 1px solid #eee; padding: .5rem 0; }
+    .st-qty { display: flex; align-items: center; gap: .4rem; }
+    .st-qty .btn { min-width: 2.75rem; min-height: 2.75rem; font-size: 1.25rem; }
+    .st-bar { position: fixed; left: 0; right: 0; bottom: 0; background: #fff; border-top: 1px solid #ced4da; padding: .6rem 1rem; z-index: 1030; box-shadow: 0 -2px 8px rgba(0,0,0,.08); }
+    .st-bar-in { max-width: 640px; margin: 0 auto; display: flex; align-items: center; gap: .75rem; }
+    .st-bar-in .sum { flex: 1; }
+    .st-bar-in .btn { min-height: 3rem; min-width: 7rem; font-size: 1.1rem; }
+    .st-sheet-body { max-width: 640px; margin: 0 auto .5rem; max-height: 60vh; overflow-y: auto; padding-bottom: .5rem; border-bottom: 1px solid #eee; }
+    .st-sum { background: none; border: 0; text-align: left; padding: 0; min-height: 3rem; }
+    .st-item.flash { animation: st-flash .45s ease-out; }
+    @@keyframes st-flash { from { background: #b6e3c6; } to { background: #fff; } }
+    #st-toasts { position: fixed; top: .5rem; left: .5rem; right: .5rem; z-index: 2000; pointer-events: none; display: flex; flex-direction: column; align-items: center; gap: .4rem; }
+    .st-toast { pointer-events: auto; max-width: 420px; width: 100%; padding: .75rem 1rem; border-radius: .5rem; color: #fff; box-shadow: 0 4px 12px rgba(0,0,0,.25); font-weight: 500; }
+    .st-toast.success { background: #198754; }
+    .st-toast.danger { background: #dc3545; }
+    .st-toast.info { background: #0d6efd; }
+    .st-toast.warning { background: #ffc107; color: #000; }
+</style>
+}
+
+<div id="st-toasts" aria-live="polite"></div>
+<div id="staff-app"><div class="text-center text-muted py-5">Loading...</div></div>
+
+@section Scripts {
+<script src="~/js/staff.js" asp-append-version="true"></script>
+}
