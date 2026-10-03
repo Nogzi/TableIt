@@ -41,3 +41,5 @@ app.MapControllers();
 app.MapHub<RestaurantHub>("/hubs/restaurant");
 
 app.Run();
+
+public partial class Program { }
