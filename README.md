@@ -43,13 +43,13 @@ TableIt is a system for restaurants to organise their seating plan and their ord
 
 | Path | Purpose |
 |---|---|
-| `TableItShared/Models` | Shared models: `Table`, `MenuItem`, `Order`, `OrderLine`, and the request DTOs |
-| `TableItWeb/Controllers` | REST API: `OrderController`, `TablesController`, `MenuController` |
-| `TableItWeb/Hubs` | `RestaurantHub`, the SignalR hub that pushes live events |
-| `TableItWeb/Data` | `TableItDbContext` (EF Core) and `SeedData` |
-| `TableItWeb/Services` | `ServiceDay`, which works out when "tonight" starts |
-| `TableItWeb/Pages` | Razor pages: `Staff`, `Kitchen` (orders), `Kitchen/Planner` and `Kitchen/Menu` |
-| `TableItWeb/wwwroot/js` | Page scripts. `api.js` holds the shared fetch and SignalR helpers |
+| `src/TableItShared/Models` | Shared models: `Table`, `MenuItem`, `Order`, `OrderLine`, and the request DTOs |
+| `src/TableItWeb/Controllers` | REST API: `OrderController`, `TablesController`, `MenuController` |
+| `src/TableItWeb/Hubs` | `RestaurantHub`, the SignalR hub that pushes live events |
+| `src/TableItWeb/Data` | `TableItDbContext` (EF Core) and `SeedData` |
+| `src/TableItWeb/Services` | `ServiceDay`, which works out when "tonight" starts |
+| `src/TableItWeb/Pages` | Razor pages: `Staff`, `Kitchen` (orders), `Kitchen/Planner` and `Kitchen/Menu` |
+| `src/TableItWeb/wwwroot/js` | Page scripts. `api.js` holds the shared fetch and SignalR helpers |
 
 ### API
 
@@ -68,7 +68,7 @@ TableIt is a system for restaurants to organise their seating plan and their ord
 Requires the .NET 8 SDK.
 
 ```bash
-dotnet run --project TableItWeb --launch-profile http
+dotnet run --project src/TableItWeb --launch-profile http
 ```
 
 Then open `http://localhost:5269`. From a phone on the same network, use `http://<your-computer's-IP>:5269/Staff`.

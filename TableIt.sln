@@ -1,8 +1,8 @@
 ﻿
 Microsoft Visual Studio Solution File, Format Version 12.00
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "TableItShared", "TableItShared\TableItShared.csproj", "{12907AAE-D925-4010-96B2-527BBF36AA23}"
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "TableItShared", "src\TableItShared\TableItShared.csproj", "{12907AAE-D925-4010-96B2-527BBF36AA23}"
 EndProject
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "TableItWeb", "TableItWeb\TableItWeb.csproj", "{54F721F9-016F-4B30-A4E0-2C622F15252C}"
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "TableItWeb", "src\TableItWeb\TableItWeb.csproj", "{54F721F9-016F-4B30-A4E0-2C622F15252C}"
 EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
