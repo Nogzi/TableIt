@@ -18,8 +18,13 @@ var app = builder.Build();
 using (var scope = app.Services.CreateScope())
 {
     var db = scope.ServiceProvider.GetRequiredService<TableItDbContext>();
-    db.Database.EnsureCreated();
-    SeedData.Seed(db);
+    // WAL lets readers and the writer overlap; the journal mode is persisted in the database file.
+    db.Database.OpenConnection();
+    db.Database.ExecuteSqlRaw("PRAGMA journal_mode=WAL;");
+    db.Database.CloseConnection();
+    db.Database.Migrate();
+    if (app.Configuration.GetValue<bool>("Seed:DemoData"))
+        SeedData.Seed(db);
 }
 
 if (!app.Environment.IsDevelopment())

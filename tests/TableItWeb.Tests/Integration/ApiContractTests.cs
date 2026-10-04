@@ -116,12 +116,12 @@ public sealed class ApiContractTests : IDisposable
         var created = await PostOrder(tableId, menuItemId);
         var id = JsonDocument.Parse(await created.Content.ReadAsStringAsync()).RootElement.GetProperty("id").GetInt32();
 
-        var response = await _client.PatchAsync($"/api/orders/{id}/status", Json("""{"status":"Ready"}"""));
+        var response = await _client.PatchAsync($"/api/orders/{id}/status", Json("""{"status":"InProgress"}"""));
 
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
-        Assert.Contains("\"status\":\"Ready\"", await response.Content.ReadAsStringAsync());
+        Assert.Contains("\"status\":\"InProgress\"", await response.Content.ReadAsStringAsync());
         var reread = await GetJson($"/api/orders/{id}");
-        Assert.Equal("Ready", reread.GetProperty("status").GetString());
+        Assert.Equal("InProgress", reread.GetProperty("status").GetString());
     }
 
     [Fact]

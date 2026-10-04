@@ -24,6 +24,7 @@ public class TableItDbContext : DbContext
         modelBuilder.Entity<Order>(e =>
         {
             e.Property(o => o.Status).HasConversion<string>();
+            e.HasIndex(o => o.ClientRequestId).IsUnique();
             e.HasMany(o => o.Lines)
                 .WithOne()
                 .HasForeignKey(l => l.OrderId)

@@ -1,3 +1,5 @@
+using Microsoft.Extensions.Configuration;
+using TableItWeb.Services;
 using Microsoft.AspNetCore.Mvc;
 using TableItShared.Models;
 using TableItWeb.Controllers;
@@ -89,6 +91,27 @@ public class OrderReadingTests : IDisposable
         var result = (await _controller.GetOrders(t2.Id, OrderStatus.Ready)).ValueOrFail();
 
         Assert.Equal(wanted.Id, Assert.Single(result).Id);
+    }
+
+    [Fact]
+    public async Task GetOrders_UsesConfiguredServiceDayStart()
+    {
+        var config = new ConfigurationBuilder()
+            .AddInMemoryCollection(new Dictionary<string, string?>
+            {
+                ["Restaurant:TimeZone"] = "Pacific/Auckland",
+                ["Restaurant:ServiceDayStartHour"] = "9",
+            }).Build();
+        var controller = new OrderController(_db.Context, new FakeHubContext(), config);
+        var start = ServiceDay.StartUtc(config);
+        var t = _db.AddTable(1);
+        var before = AddOrder(t, start.AddMinutes(-1));
+        var after = AddOrder(t, start.AddMinutes(1));
+
+        var result = (await controller.GetOrders(null, null)).ValueOrFail();
+
+        Assert.Equal(after.Id, Assert.Single(result).Id);
+        Assert.DoesNotContain(result, o => o.Id == before.Id);
     }
 
     [Fact]

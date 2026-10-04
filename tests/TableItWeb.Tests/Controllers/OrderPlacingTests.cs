@@ -198,4 +198,62 @@ public class OrderPlacingTests : IDisposable
         Assert.Equal(new[] { 1, 2 }, lines.Select(l => l.Quantity));
         Assert.Equal(new[] { "first", "second" }, lines.Select(l => l.Note));
     }
+
+    [Fact]
+    public async Task CreateOrder_SameClientRequestIdTwice_ReturnsSameOrderAndBroadcastsOnce()
+    {
+        var table = _db.AddTable(1);
+        var item = _db.AddMenuItem("Soup");
+        var id = Guid.NewGuid();
+        var req = new CreateOrderRequest(table.Id, null, new() { new CreateOrderLine(item.Id, 1, null) }, id);
+
+        var first = await _controller.CreateOrder(req);
+        var second = await _controller.CreateOrder(req);
+
+        var created = Assert.IsType<Order>(Assert.IsType<CreatedAtActionResult>(first.Result).Value);
+        var repeat = Assert.IsType<OkObjectResult>(second.Result);
+        Assert.Equal(200, repeat.StatusCode);
+        Assert.Equal(created.Id, Assert.IsType<Order>(repeat.Value).Id);
+        using var ctx = _db.NewContext();
+        Assert.Single(ctx.Orders.ToList());
+        Assert.Single(ctx.OrderLines.ToList());
+        Assert.Equal(id, ctx.Orders.Single().ClientRequestId);
+        Assert.Single(_hub.Sent);
+    }
+
+    [Fact]
+    public async Task CreateOrder_DifferentClientRequestIds_CreateSeparateOrders()
+    {
+        var table = _db.AddTable(1);
+        var item = _db.AddMenuItem("Soup");
+        CreateOrderRequest Req() => new(table.Id, null, new() { new CreateOrderLine(item.Id, 1, null) }, Guid.NewGuid());
+
+        await _controller.CreateOrder(Req());
+        await _controller.CreateOrder(Req());
+
+        using var ctx = _db.NewContext();
+        Assert.Equal(2, ctx.Orders.Count());
+        Assert.Equal(2, _hub.Sent.Count);
+    }
+
+    [Fact]
+    public async Task CreateOrder_NoClientRequestId_AllowsRepeatedIdenticalOrders()
+    {
+        var table = _db.AddTable(1);
+        var item = _db.AddMenuItem("Soup");
+
+        await _controller.CreateOrder(Request(table.Id, new CreateOrderLine(item.Id, 1, null)));
+        await _controller.CreateOrder(Request(table.Id, new CreateOrderLine(item.Id, 1, null)));
+
+        using var ctx = _db.NewContext();
+        Assert.Equal(2, ctx.Orders.Count());
+    }
+
+    [Fact]
+    public void ClientRequestId_HasUniqueIndex()
+    {
+        var index = _db.Context.Model.FindEntityType(typeof(Order))!
+            .GetIndexes().Single(i => i.Properties.Any(p => p.Name == nameof(Order.ClientRequestId)));
+        Assert.True(index.IsUnique);
+    }
 }
