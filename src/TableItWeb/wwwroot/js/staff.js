@@ -17,7 +17,13 @@
     let lastRoute = null;
     let draft = newDraft(null);
 
-    function newDraft(tableId) { return { tableId: tableId, lines: [], note: '' }; }
+    function newRequestId() {
+        if (window.crypto && typeof crypto.randomUUID === 'function') return crypto.randomUUID();
+        const h = function (n) { let s = ''; for (let i = 0; i < n; i++) s += Math.floor(Math.random() * 16).toString(16); return s; };
+        return h(8) + '-' + h(4) + '-4' + h(3) + '-' + '89ab'[Math.floor(Math.random() * 4)] + h(3) + '-' + h(12);
+    }
+
+    function newDraft(tableId) { return { tableId: tableId, lines: [], note: '', clientRequestId: newRequestId() }; }
 
     // ---------- helpers ----------
     function toast(msg, kind, ms) {
@@ -227,6 +233,7 @@
         const body = {
             tableId: draft.tableId,
             note: draft.note.trim() || null,
+            clientRequestId: draft.clientRequestId,
             lines: draft.lines.map(function (l) { return { menuItemId: l.menuItemId, quantity: l.quantity, note: (l.note || '').trim() || null }; })
         };
         try {

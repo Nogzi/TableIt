@@ -87,7 +87,7 @@ public class OrderStatusTests : IDisposable
     {
         var order = AddOrder();
 
-        var result = await _controller.UpdateStatus(order.Id, new UpdateOrderStatusRequest(OrderStatus.Ready));
+        var result = await _controller.UpdateStatus(order.Id, new UpdateOrderStatusRequest(OrderStatus.InProgress));
 
         Assert.Single(result.ValueOrFail().Lines);
     }
@@ -99,5 +99,71 @@ public class OrderStatusTests : IDisposable
 
         Assert.IsType<NotFoundResult>(result.Result);
         Assert.Empty(_hub.Sent);
+    }
+
+    private Order AddOrderWithStatus(OrderStatus status)
+    {
+        var order = AddOrder();
+        order.Status = status;
+        _db.Context.SaveChanges();
+        return order;
+    }
+
+    public static IEnumerable<object[]> Transitions()
+    {
+        var allowed = new Dictionary<OrderStatus, OrderStatus[]>
+        {
+            [OrderStatus.New] = new[] { OrderStatus.InProgress, OrderStatus.Cancelled },
+            [OrderStatus.InProgress] = new[] { OrderStatus.Ready, OrderStatus.New, OrderStatus.Cancelled },
+            [OrderStatus.Ready] = new[] { OrderStatus.Served, OrderStatus.InProgress, OrderStatus.Cancelled },
+            [OrderStatus.Served] = new[] { OrderStatus.Ready },
+            [OrderStatus.Cancelled] = Array.Empty<OrderStatus>()
+        };
+        foreach (var from in Enum.GetValues<OrderStatus>())
+            foreach (var to in Enum.GetValues<OrderStatus>())
+                if (from != to)
+                    yield return new object[] { from, to, allowed[from].Contains(to) };
+    }
+
+    [Theory]
+    [MemberData(nameof(Transitions))]
+    public async Task UpdateStatus_TransitionTable_AllowsOrRejects(OrderStatus from, OrderStatus to, bool allowed)
+    {
+        var order = AddOrderWithStatus(from);
+
+        var result = await _controller.UpdateStatus(order.Id, new UpdateOrderStatusRequest(to));
+
+        using var ctx = _db.NewContext();
+        if (allowed)
+        {
+            Assert.Equal(to, result.ValueOrFail().Status);
+            Assert.Equal(to, ctx.Orders.Single().Status);
+            Assert.Single(_hub.Sent);
+        }
+        else
+        {
+            var conflict = Assert.IsType<ConflictObjectResult>(result.Result);
+            Assert.Equal(409, conflict.StatusCode);
+            Assert.Contains(from.ToString(), (string)conflict.Value!);
+            Assert.Equal(from, ctx.Orders.Single().Status);
+            Assert.Empty(_hub.Sent);
+        }
+    }
+
+    [Theory]
+    [InlineData(OrderStatus.New)]
+    [InlineData(OrderStatus.Served)]
+    [InlineData(OrderStatus.Cancelled)]
+    public async Task UpdateStatus_SameStatus_IsNoOpOkWithoutBroadcast(OrderStatus status)
+    {
+        var order = AddOrderWithStatus(status);
+        var updatedAt = order.UpdatedAt;
+
+        var result = await _controller.UpdateStatus(order.Id, new UpdateOrderStatusRequest(status));
+
+        Assert.Equal(status, result.ValueOrFail().Status);
+        Assert.Empty(_hub.Sent);
+        using var ctx = _db.NewContext();
+        Assert.Equal(updatedAt, ctx.Orders.Single().UpdatedAt);
     }
 }

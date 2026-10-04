@@ -26,6 +26,13 @@ public class MenuController : ControllerBase
     private async Task Broadcast() =>
         await _hub.Clients.All.SendAsync("MenuChanged", await AllItems());
 
+    private static void Normalize(MenuItem item)
+    {
+        item.Name = item.Name?.Trim() ?? "";
+        item.Category = item.Category?.Trim() ?? "";
+        item.Description = item.Description?.Trim() ?? "";
+    }
+
     [HttpGet]
     public async Task<ActionResult<List<MenuItem>>> GetMenu() => await AllItems();
 
@@ -33,6 +40,7 @@ public class MenuController : ControllerBase
     public async Task<ActionResult<MenuItem>> Create([FromBody] MenuItem item)
     {
         item.Id = 0;
+        Normalize(item);
         _db.MenuItems.Add(item);
         await _db.SaveChangesAsync();
         await Broadcast();
@@ -46,6 +54,7 @@ public class MenuController : ControllerBase
         if (existing is null)
             return NotFound();
 
+        Normalize(item);
         existing.Name = item.Name;
         existing.Description = item.Description;
         existing.Category = item.Category;

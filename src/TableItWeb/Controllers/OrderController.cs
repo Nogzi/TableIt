@@ -14,11 +14,13 @@ public class OrderController : ControllerBase
 {
     private readonly TableItDbContext _db;
     private readonly IHubContext<RestaurantHub> _hub;
+    private readonly IConfiguration? _config;
 
-    public OrderController(TableItDbContext db, IHubContext<RestaurantHub> hub)
+    public OrderController(TableItDbContext db, IHubContext<RestaurantHub> hub, IConfiguration? config = null)
     {
         _db = db;
         _hub = hub;
+        _config = config;
     }
 
     [HttpGet]
@@ -29,7 +31,7 @@ public class OrderController : ControllerBase
 
         if (!all)
         {
-            var start = ServiceDay.StartUtc();
+            var start = ServiceDay.StartUtc(_config);
             query = query.Where(o => o.CreatedAt >= start);
         }
         if (tableId.HasValue)
@@ -47,9 +49,25 @@ public class OrderController : ControllerBase
         return order is null ? NotFound() : order;
     }
 
+    private static readonly Dictionary<OrderStatus, OrderStatus[]> AllowedTransitions = new()
+    {
+        [OrderStatus.New] = new[] { OrderStatus.InProgress, OrderStatus.Cancelled },
+        [OrderStatus.InProgress] = new[] { OrderStatus.Ready, OrderStatus.New, OrderStatus.Cancelled },
+        [OrderStatus.Ready] = new[] { OrderStatus.Served, OrderStatus.InProgress, OrderStatus.Cancelled },
+        [OrderStatus.Served] = new[] { OrderStatus.Ready },
+        [OrderStatus.Cancelled] = Array.Empty<OrderStatus>()
+    };
+
+    private Task<Order?> FindByClientRequestId(Guid id) =>
+        _db.Orders.Include(o => o.Lines).FirstOrDefaultAsync(o => o.ClientRequestId == id);
+
     [HttpPost]
     public async Task<ActionResult<Order>> CreateOrder([FromBody] CreateOrderRequest request)
     {
+        // A retry of an already-placed order returns the original instead of creating a duplicate.
+        if (request.ClientRequestId is { } requestId && await FindByClientRequestId(requestId) is { } existing)
+            return Ok(existing);
+
         var table = await _db.Tables.FirstOrDefaultAsync(t => t.Id == request.TableId);
         if (table is null)
             return BadRequest("Table does not exist.");
@@ -77,6 +95,7 @@ public class OrderController : ControllerBase
             UpdatedAt = now,
             Status = OrderStatus.New,
             Note = request.Note,
+            ClientRequestId = request.ClientRequestId,
             Lines = request.Lines.Select(l => new OrderLine
             {
                 MenuItemId = l.MenuItemId,
@@ -88,7 +107,18 @@ public class OrderController : ControllerBase
         };
 
         _db.Orders.Add(order);
-        await _db.SaveChangesAsync();
+        try
+        {
+            await _db.SaveChangesAsync();
+        }
+        catch (DbUpdateException) when (request.ClientRequestId.HasValue)
+        {
+            // A concurrent request with the same ID won the race; return its order.
+            _db.ChangeTracker.Clear();
+            if (await FindByClientRequestId(request.ClientRequestId.Value) is { } winner)
+                return Ok(winner);
+            throw;
+        }
         await _hub.Clients.All.SendAsync("OrderCreated", order);
 
         return CreatedAtAction(nameof(GetOrder), new { id = order.Id }, order);
@@ -101,6 +131,11 @@ public class OrderController : ControllerBase
         var order = await _db.Orders.Include(o => o.Lines).FirstOrDefaultAsync(o => o.Id == id);
         if (order is null)
             return NotFound();
+
+        if (order.Status == request.Status)
+            return order;
+        if (!AllowedTransitions[order.Status].Contains(request.Status))
+            return Conflict($"Cannot change an order from {order.Status} to {request.Status}.");
 
         order.Status = request.Status;
         order.UpdatedAt = DateTime.UtcNow;
