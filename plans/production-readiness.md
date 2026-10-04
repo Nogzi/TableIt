@@ -1,9 +1,9 @@
 # Plan: Production readiness for TableIt
 Status: draft
-Version: 2
+Version: 3
 
 ## Goal
-TableIt runs unattended on an on-prem box in one restaurant. Every person signs in with their own account (username + short PIN) and has a role (Staff, Kitchen or Manager), and each order records who took it and who changed its status. Data survives upgrades through EF Core migrations and nightly backups, order notes are cleared after a configurable 30 days, and the app ships as a Docker + Caddy deployment with HTTPS, health checks, logs, CI, and an operations runbook.
+TableIt runs unattended on an on-prem box in one restaurant. Every person signs in with their own account (a username given by a manager and a password they choose themselves) and has a role (Staff, Kitchen or Manager), and each order records who took it and who changed its status. Data survives upgrades through EF Core migrations and nightly backups, order notes are cleared after a configurable 30 days, and the app ships as a Docker + Caddy deployment with HTTPS, health checks, logs, CI, and an operations runbook.
 
 ## Decisions
 User answers to the Version 1 open questions:
@@ -15,8 +15,17 @@ User answers to the Version 1 open questions:
 6. **Note retention:** clear `Order.Note` and `OrderLine.Note` on orders older than 30 days, keeping the rest of the order. The period is configurable (`Retention:NoteDays`, default 30).
 7. **Database: keep SQLite.** WAL mode is already on (T4); backups are added in T14.
 
+User answers to the Version 2 open questions:
+8. **Login screen: a plain username + password form.** No name picker and no PIN. A manager creates each account (username, display name, role). The staff member chooses their own password, and the manager never knows it.
+   - Creating an account (or resetting a password) gives the manager a one-time setup code to hand over. The code is single use, valid for 24 hours, and shown once.
+   - The staff member enters their username, the code and a new password on a "Set your password" page.
+   - "Reset password" issues a new setup code and signs the user out everywhere.
+   - Signed-in staff can change their own password.
+9. **Devices: mostly personal phones.** 12-hour sliding session, a manual "Switch user", and idle sign-out off by default (`Auth:IdleSignOutMinutes`, default 0, kept as an optional setting).
+10. **Minimum password length: 8 characters.** Any characters, no composition rules, configurable through `Auth:MinPasswordLength` (default 8). The lockout (5 tries, then 5 minutes) and the per-IP login rate limit stay.
+
 ## Assumptions
-- **Base branch.** T1–T5 are done in PR #8 (`feat/production-readiness`, not merged yet), so T6 onwards branch from `feat/production-readiness`, or from `main` once PR #8 is merged.
+- **Base branch.** T1–T5 are done in PR #8 (`feat/production-readiness`). By the user’s choice, T6 waits until PR #8 is merged into main, and T6 onwards branch from main.
 - **Baseline.** Build and test with `dotnet build TableIt.sln` and `dotnet test TableIt.sln`. CI (`.github/workflows/ci.yml`) runs the same commands. EF tooling comes from the local tool manifest (`.config/dotnet-tools.json`): `dotnet tool restore && dotnet ef ...`. There is no separate linter, so build warnings count as lint.
 - **Identity fits the current DbContext** (checked on `feat/production-readiness`):
   - `TableItDbContext` derives from plain `DbContext` and its `OnModelCreating` does not call `base`. Switching it to `IdentityDbContext<StaffUser, IdentityRole, string>` only requires adding `base.OnModelCreating(modelBuilder)` as the first line.
@@ -25,18 +34,27 @@ User answers to the Version 1 open questions:
   - The constructor signature stays the same, so `TestDb` and `TableItFactory` keep working.
   - `MigrationTests.Migrate_OnEmptyFile_CreatesSchemaMatchingTheModel` will catch a forgotten migration.
   - New package needed: `Microsoft.AspNetCore.Identity.EntityFrameworkCore` 8.0.*.
-- **Recommended sign-in design for a busy floor** (the default unless open question 1 or 2 changes it):
-  - **Credentials.** Identity username plus a numeric PIN used as the password. The password policy allows digits only, minimum length `Auth:MinPinLength` (default 4), with no complexity rules.
-  - **Lockout.** Identity lockout after 5 failed attempts for 5 minutes, plus a per-IP rate limit on the login POST.
+- **Sign-in design** (Decisions 8–10):
+  - **Credentials.** Identity username and password. The password policy is length at least `Auth:MinPasswordLength` (default 8), with no digit, case, symbol or unique-character requirements.
+  - **Lockout.** Identity lockout after 5 failed attempts for 5 minutes, plus a per-IP rate limit on the login and set-password POSTs.
   - **Cookie.** HttpOnly, SameSite=Strict, Secure, 12-hour sliding expiry.
-  - **Fast revocation.** `SecurityStampValidatorOptions.ValidationInterval` of 1 minute, so deactivating a user or resetting their PIN signs them out everywhere within a minute.
-  - **Shared devices.** A prominent "Switch user" action signs out and opens the login page with the user picker. Optional idle sign-out via `Auth:IdleSignOutMinutes` (default 0, which means off).
+  - **Fast revocation.** `SecurityStampValidatorOptions.ValidationInterval` of 1 minute, so deactivating a user or resetting their password signs them out everywhere within a minute.
+  - **Shared devices.** A prominent "Switch user" action signs out and opens the login form. Optional idle sign-out via `Auth:IdleSignOutMinutes` (default 0, which means off).
   - **Kitchen screen.** The kitchen display can be signed in as an ordinary Kitchen-role account for the whole night. Status changes are then attributed to that account, which is acceptable.
-- **Bootstrapping the first Manager** (recommended): a CLI command, `dotnet TableItWeb.dll create-manager --username <name> --display-name "<name>"` (in Docker: `docker compose run --rm app create-manager ...`).
-  - It prompts for the PIN on stdin, which also accepts piped input for scripting.
-  - It refuses to run if an active Manager already exists, unless `--reset-pin` is given (`--reset-pin` is the lock-out recovery path).
-  - There is no hard-coded default password anywhere.
-  - In Development only, when `Seed:DemoData=true`, demo users with documented throwaway PINs are seeded.
+- **Setup codes need no new table, so T6 stays the only migration.**
+  - A user created by a manager has no password (`PasswordHash` is null), so the user cannot sign in until the code is redeemed.
+  - `SetupCodeService` (T7) generates a random 8-character code from an unambiguous alphabet, formatted like `K7QM-4TXR` (about 40 bits).
+  - It stores only a SHA-256 hash and the expiry time, as an Identity user token: `SetAuthenticationTokenAsync(user, "TableIt", "SetupCode", "<hash>|<expiresUtc>")`. That uses the `AspNetUserTokens` table, which T6's migration already creates.
+  - Redeeming checks the hash (constant-time comparison) and the expiry, then sets the password with `AddPasswordAsync`, removes the token (single use) and updates the security stamp.
+  - Failed redemptions count toward lockout (`AccessFailedAsync`), and the page is rate-limited.
+  - Issuing a new code replaces the old one.
+  - Resetting a password calls `RemovePasswordAsync`, issues a new code and updates the security stamp.
+  - Identity's built-in reset tokens were considered and not used. `DataProtectorTokenProvider` tokens are too long to read out or type, and the TOTP providers only last minutes.
+- **Bootstrapping the first Manager:** a CLI command, `dotnet TableItWeb.dll create-manager --username <name> --display-name "<name>"` (in Docker: `docker compose run --rm app create-manager ...`).
+  - It prompts for the Manager's password twice (masked on a TTY; piped stdin is also accepted for scripting). No setup code is involved.
+  - It refuses to run if an active Manager already exists, unless `--reset-password` is given (`--reset-password` is the lock-out recovery path).
+  - There is no hard-coded default password outside the Development seed.
+  - In Development only, when `Seed:DemoData=true`, demo users with the documented dev-only password `tableit-dev` are seeded.
 - **Role matrix** (Manager implies the other two roles):
   - Staff: read orders, tables and menu; place orders; set status to Served or Cancelled.
   - Kitchen: read orders and menu; any allowed status transition; the `/Kitchen` page.
@@ -47,18 +65,10 @@ User answers to the Version 1 open questions:
 - **Migrations.** Only T6 changes the schema in this version. Any later schema change must add its own migration, and tasks that touch `Migrations/` never share a wave.
 - **README.** Only T19 edits `README.md`.
 - **Backlog, out of scope for this plan:** bills and payments, customer self-ordering, reservations, multiple floors, kitchen printers, Danish UI translation, end-of-day reports, editing order lines after sending, PWA install, and a UI for browsing the status audit trail (the data is recorded now).
-- **Task renumbering.** T6–T16 from Version 1 are renumbered: old T6–T8 (shared-PIN auth) become T6–T12 (Identity), and old T9→T13, T10→T14, T11→T15, T14→T16, T15→T17, T16→T18, T13→T19, T12→T20.
+- **Task renumbering.** T6–T16 from Version 1 are renumbered: old T6–T8 (shared-PIN auth, since replaced by passwords) become T6–T12 (Identity), and old T9→T13, T10→T14, T11→T15, T14→T16, T15→T17, T16→T18, T13→T19, T12→T20.
 
 ## Open questions
-1. How does a user pick their account on the login screen?
-   Options: A) A grid of active staff display names to tap, then a PIN keypad. B) Type the username, then the PIN.
-   Recommended: A, because it is the fastest flow on a shared tablet mid-service. The names are only visible on the restaurant LAN over HTTPS. It can be switched off with `Auth:ShowUserPicker=false`, which falls back to B. This affects T8.
-2. Are staff phones personal or shared house devices?
-   Options: A) Mostly personal: 12-hour sliding session, manual "Switch user", idle sign-out off by default. B) Shared house devices: also enable idle sign-out after 10 minutes by default.
-   Recommended: A, because forced sign-outs mid-service cost time, and B is a one-line config change (`Auth:IdleSignOutMinutes`). This affects the T7 defaults and T12.
-3. Minimum PIN length?
-   Options: A) 4 digits, with lockout and IP rate limiting. B) 6 digits.
-   Recommended: A, because 5 attempts per 5 minutes over a LAN makes guessing impractical, and 4 digits is quicker to enter. Configurable through `Auth:MinPinLength`. This affects the T7 default only.
+None.
 
 ## Tasks
 ### T1: Input validation and limits on the API (must-have)
@@ -109,18 +119,18 @@ User answers to the Version 1 open questions:
   - Add `Order.CreatedByUserId` (string?, at most 450) and `Order.CreatedByName` (string?, at most 100).
   - Add the `OrderStatusChange` entity (Id, OrderId FK with cascade delete, From and To as string-converted enums, `UserId?`, `UserName?` at most 100, `At` as UTC using the existing converter pattern) and a `DbSet<OrderStatusChange> OrderStatusChanges`, indexed on OrderId.
   - Create the migration `AddIdentityAndOrderAttribution` with `dotnet tool restore && dotnet ef migrations add AddIdentityAndOrderAttribution --project src/TableItWeb --output-dir Data/Migrations`.
-  - No service wiring and no controller changes.
+  - No service wiring and no controller changes. Setup codes live in `AspNetUserTokens` (created by this migration), so no extra table is needed for them.
 - Done when: the migration applies cleanly on top of `InitialCreate`, both on an empty DB and on a DB that already has orders (old orders get null attribution). `MigrationTests` still reports no pending model changes, and all existing tests pass.
 - Verify: `dotnet test TableIt.sln && dotnet tool restore && dotnet ef migrations has-pending-model-changes --project src/TableItWeb`
 
-### T7: Identity services, cookie auth, roles and Manager bootstrap command (must-have)
+### T7: Identity services, cookie auth, roles, setup codes and Manager bootstrap command (must-have)
 - [ ] Not done
 - Agent: implementer
 - Depends on: T6
-- Files: src/TableItWeb/Program.cs, src/TableItWeb/Auth/AuthSetup.cs (new; `AddTableItAuth` extension), src/TableItWeb/Auth/Roles.cs (new; role names and policy names), src/TableItWeb/Auth/StaffSignInManager.cs (new), src/TableItWeb/Auth/StaffClaimsFactory.cs (new), src/TableItWeb/Auth/RoleSeeder.cs (new), src/TableItWeb/Auth/CreateManagerCommand.cs (new), src/TableItWeb/Data/SeedData.cs, src/TableItWeb/appsettings.json, src/TableItWeb/appsettings.Development.json, tests/TableItWeb.Tests/Auth/AuthSetupTests.cs (new), tests/TableItWeb.Tests/Auth/CreateManagerCommandTests.cs (new)
+- Files: src/TableItWeb/Program.cs, src/TableItWeb/Auth/AuthSetup.cs (new; `AddTableItAuth` extension), src/TableItWeb/Auth/Roles.cs (new; role names and policy names), src/TableItWeb/Auth/StaffSignInManager.cs (new), src/TableItWeb/Auth/StaffClaimsFactory.cs (new), src/TableItWeb/Auth/RoleSeeder.cs (new), src/TableItWeb/Auth/SetupCodeService.cs (new), src/TableItWeb/Auth/CreateManagerCommand.cs (new), src/TableItWeb/Data/SeedData.cs, src/TableItWeb/appsettings.json, src/TableItWeb/appsettings.Development.json, tests/TableItWeb.Tests/Auth/AuthSetupTests.cs (new), tests/TableItWeb.Tests/Auth/SetupCodeServiceTests.cs (new), tests/TableItWeb.Tests/Auth/CreateManagerCommandTests.cs (new)
 - Do:
-  - Register `AddIdentity<StaffUser, IdentityRole>().AddEntityFrameworkStores<TableItDbContext>()`.
-  - Password policy: digits only, length at least `Auth:MinPinLength` (default 4) and at most 8. Lockout after 5 failed attempts for 5 minutes, also enabled for new users. Unique usernames.
+  - Register `AddIdentity<StaffUser, IdentityRole>().AddEntityFrameworkStores<TableItDbContext>().AddDefaultTokenProviders()`.
+  - Password policy: `RequiredLength = Auth:MinPasswordLength` (default 8), `RequireDigit`, `RequireLowercase`, `RequireUppercase` and `RequireNonAlphanumeric` all false, `RequiredUniqueChars = 1`. Lockout after 5 failed attempts for 5 minutes, also enabled for new users. Unique usernames.
   - `StaffSignInManager.CanSignInAsync` returns false when `IsActive` is false.
   - `StaffClaimsFactory` adds a `display_name` claim.
   - Application cookie:
@@ -131,34 +141,53 @@ User answers to the Version 1 open questions:
   - Security stamp validation interval of 1 minute.
   - Persist Data Protection keys to `DataProtection:KeysPath` when it is set (default: no override in Development).
   - Policies `StaffAccess` (Staff, Kitchen or Manager), `KitchenAccess` (Kitchen or Manager) and `ManagerAccess` (Manager). Register them, but do NOT add a fallback policy or attributes; T9 enforces them.
-  - Register a rate-limiter policy named `login` (fixed window, 10 per minute per IP) for T8 to apply.
+  - Register a rate-limiter policy named `login` (fixed window, 10 per minute per IP) for T8 to apply to the login and set-password POSTs.
   - Call `UseAuthentication()` before `UseAuthorization()`.
   - At startup, after `Migrate()`, idempotently create the three roles.
+  - `SetupCodeService`, as described in Assumptions:
+    - `IssueAsync(user)` returns the plain code once and stores a hash and expiry. The lifetime is `Auth:SetupCodeHours`, default 24.
+    - `RedeemAsync(userName, code, newPassword)` returns a result: Success, InvalidOrExpired, LockedOut, Inactive, or PasswordRejected (with the Identity errors).
+    - On a failed redemption it calls `AccessFailedAsync` for an existing user, and gives the same generic failure for unknown usernames.
   - `CreateManagerCommand`:
     - Program.cs checks `args[0] == "create-manager"`, runs migrations, runs the command and exits without starting Kestrel.
-    - Arguments: `--username`, `--display-name`, optional `--reset-pin`. The PIN is read from stdin, so piped input works.
-    - It refuses if an active Manager exists, unless `--reset-pin` is given and the target user exists. On reset it also unlocks the user and updates the security stamp. Exit codes are non-zero on errors.
-  - In `SeedData` (Development only, when `Seed:DemoData` is true), seed the users `manager`, `waiter` and `chef` with PIN `1234` and a matching role each. Document this in appsettings.Development.json.
-  - Add an `"Auth": { "MinPinLength": 4, "SessionHours": 12, "IdleSignOutMinutes": 0, "ShowUserPicker": true }` section to appsettings.json.
-- Done when: the tests show that roles are seeded, `create-manager` creates exactly one Manager and refuses a second, `--reset-pin` works, an inactive user cannot sign in, the 6th wrong PIN locks the account, and an anonymous `/api` call is still allowed (enforcement comes in T9). All existing tests pass.
+    - Arguments: `--username`, `--display-name`, optional `--reset-password`.
+    - The password is prompted twice: masked when stdin is a TTY, otherwise read as the first two lines of piped input.
+    - It refuses if an active Manager exists, unless `--reset-password` is given and the target user exists. On reset it replaces the password, unlocks the user and updates the security stamp. Exit codes are non-zero on errors (including a password rejected by the policy).
+  - In `SeedData` (Development only, when `Seed:DemoData` is true), seed the users `manager`, `waiter` and `chef` with the dev-only password `tableit-dev` and a matching role each. Document this in appsettings.Development.json.
+  - Add an `"Auth": { "MinPasswordLength": 8, "SessionHours": 12, "IdleSignOutMinutes": 0, "SetupCodeHours": 24 }` section to appsettings.json.
+- Done when: the tests show:
+  - roles are seeded
+  - `create-manager` creates exactly one Manager, refuses a second, and `--reset-password` works
+  - an inactive user cannot sign in, and the 6th wrong password locks the account
+  - a setup code works once, then fails; an expired code fails; a wrong code counts toward lockout; issuing a new code invalidates the old one
+  - an anonymous `/api` call is still allowed (enforcement comes in T9)
+  All existing tests pass.
 - Verify: `dotnet test TableIt.sln`
 
-### T8: Sign-in, sign-out and switch-user pages (must-have)
+### T8: Sign-in, set-password, change-password, sign-out and switch-user pages (must-have)
 - [ ] Not done
 - Agent: implementer
 - Depends on: T7
-- Files: src/TableItWeb/Pages/Account/Login.cshtml(.cs), src/TableItWeb/Pages/Account/Login.cshtml.css, src/TableItWeb/Pages/Account/Logout.cshtml(.cs), src/TableItWeb/Pages/Account/AccessDenied.cshtml(.cs) (all new), tests/TableItWeb.Tests/Auth/LoginPageTests.cs (new)
+- Files: src/TableItWeb/Pages/Account/Login.cshtml(.cs), src/TableItWeb/Pages/Account/SetPassword.cshtml(.cs), src/TableItWeb/Pages/Account/ChangePassword.cshtml(.cs), src/TableItWeb/Pages/Account/Logout.cshtml(.cs), src/TableItWeb/Pages/Account/AccessDenied.cshtml(.cs), src/TableItWeb/Pages/Account/Account.css or scoped `*.cshtml.css` files (all new), tests/TableItWeb.Tests/Auth/AccountPagesTests.cs (new)
 - Do:
-  - Login page:
-    - If `Auth:ShowUserPicker` is true (open question 1), show a grid of active users' display names. Tapping a name opens a large numeric PIN pad with `inputmode="numeric"` and autofocus. Otherwise show a username field.
-    - Antiforgery token and `[EnableRateLimiting("login")]` on POST.
-    - Uses `PasswordSignInAsync(lockoutOnFailure: true)`.
-    - A generic "Wrong name or PIN" message, plus a distinct "Locked, try again in N minutes" message.
+  - **Login** (anonymous):
+    - A username and password form with `autocomplete="username"` and `autocomplete="current-password"`, large touch-friendly fields, and autofocus on the username.
+    - Antiforgery token and `[EnableRateLimiting("login")]` on POST. Uses `PasswordSignInAsync(lockoutOnFailure: true)`.
+    - A generic "Wrong username or password" message, plus a distinct "Locked, try again in N minutes" message.
+    - A link "First time here or got a new code? Set your password".
     - Only accepts a local `returnUrl` (with its `#hash`), and redirects to `/` otherwise.
-  - Logout: POST only. `?switch=1` returns to Login with the picker.
-  - AccessDenied: a friendly page with a "Switch user" button.
-  - No edits to `_Layout` or `site.css` (T12 owns them). Use scoped CSS.
-- Done when: the tests cover a correct PIN signing in with a role claim, a wrong PIN, lockout, an inactive user being rejected, an off-site `returnUrl` being ignored, and the picker listing only active users.
+  - **SetPassword** (anonymous):
+    - Fields: username, setup code (case-insensitive, dash optional), new password and confirmation, with `autocomplete="new-password"`.
+    - Rate-limited. Calls `SetupCodeService.RedeemAsync`. Shows the policy errors, and a generic message for an invalid or expired code ("Ask a manager for a new code").
+    - On success, signs the user in and redirects to `/`.
+  - **ChangePassword** (any signed-in user): current password, new password and confirmation, via `ChangePasswordAsync`. Then refresh the sign-in so the session survives the security stamp change.
+  - **Logout:** POST only. `?switch=1` returns to Login with the username field cleared and focused.
+  - **AccessDenied:** a friendly page with a "Switch user" button.
+  - No edits to `_Layout` or `site.css` (T12 owns them, including the "Change password" link).
+- Done when: the tests cover:
+  - a correct password signing in with a role claim, a wrong password, lockout, an inactive user being rejected, and an off-site `returnUrl` being ignored
+  - a setup code setting the password and signing in, reuse of the code failing, and a short password being rejected
+  - change-password requiring the current password
 - Verify: `dotnet test TableIt.sln`
 
 ### T9: Enforce authorization on API, hub and pages (must-have)
@@ -187,17 +216,24 @@ User answers to the Version 1 open questions:
 - Do:
   - A server-rendered Razor page (form posts with antiforgery) behind `[Authorize(Policy = "ManagerAccess")]`.
   - It lists users (display name, username, role, active, locked) and supports these actions:
-    - create a user (username, display name, role, PIN)
+    - create a user (username, display name, role); the result page shows the one-time setup code once, with its expiry, and tells the manager to hand it over in person
     - change role (exactly one of Staff, Kitchen or Manager)
     - deactivate or reactivate
-    - reset PIN (which also unlocks the user)
+    - reset password: removes the password, unlocks the user, issues a new setup code (shown once), and signs the user out everywhere
   - Put the logic in `StaffAdminService`:
     - Every change calls `UpdateSecurityStampAsync`, so existing sessions end within the T7 validation interval.
     - Refuse to deactivate or demote the last active Manager.
     - A manager cannot deactivate themselves.
     - No hard deletes.
   - Log every admin action with the acting manager's username.
-- Done when: the service tests cover create, role change, deactivate (the user can no longer sign in), reset PIN, and the last-Manager guard, and the page renders for a Manager.
+- The manager never sees or sets a password. Codes come from T7's `SetupCodeService`, and this task does not edit `Auth/SetupCodeService.cs`.
+- Done when: the service tests cover:
+  - create returns a code that sets the password once
+  - role change
+  - deactivate (the user can no longer sign in)
+  - reset password (the old password stops working and existing sessions end)
+  - the last-Manager guard
+  The page renders for a Manager.
 - Verify: `dotnet test TableIt.sln`
 
 ### T13: Production hosting pipeline: errors, proxy/HTTPS, headers, health, logging, config check (must-have)
@@ -239,10 +275,10 @@ User answers to the Version 1 open questions:
 - Do:
   - **`api.js` errors.** A 401 redirects to `/Account/Login?returnUrl=<path+hash>`, and a 403 shows a "Not allowed for your role" toast.
   - **SignalR.** On a 401 during negotiate or reconnect, stop retrying and redirect.
-  - **`_Layout`.** Show the display name and role, a large "Switch user" button (POST to Logout with `switch=1`) and "Sign out". Filter nav links by `User.IsInRole`, and add a "Staff" admin link (`/Manager/Staff`) for Managers.
+  - **`_Layout`.** Show the display name and role, a large "Switch user" button (POST to Logout with `switch=1`), "Change password" (`/Account/ChangePassword`) and "Sign out". Filter nav links by `User.IsInRole`, and add a "Staff" admin link (`/Manager/Staff`) for Managers.
   - **Index.** Filter the tiles the same way.
   - **Idle sign-out.** If `Auth:IdleSignOutMinutes` is greater than 0, render it into the layout as a data attribute, and have `api.js` start an inactivity timer that posts the sign-out form.
-- Done when: by manual check with `dotnet run` (Development demo users), an expired or revoked session on Staff or Kitchen lands on Login and returns to the same page and hash, "Switch user" works in two taps plus the PIN, and the nav matches the role. Existing tests pass.
+- Done when: by manual check with `dotnet run` (Development demo users), an expired or revoked session on Staff or Kitchen lands on Login and returns to the same page and hash, "Switch user" leads straight to an empty login form, and the nav matches the role. Existing tests pass.
 - Verify: `dotnet build TableIt.sln && dotnet test TableIt.sln`
 
 ### T14: Background maintenance: SQLite backups and 30-day note clearing (must-have)
@@ -256,7 +292,7 @@ User answers to the Version 1 open questions:
     - Makes an online backup with `SqliteConnection.BackupDatabase` to `Backup:Directory` as `tableit-YYYYMMDD-HHmm.db`.
     - Prunes files older than `Backup:KeepDays` (default 30).
     - Logs the result. A health check (registered with the T13 health checks) reports Degraded if the last success was more than 48 hours ago.
-    - The backup includes the Identity tables, so it holds PIN hashes. The docs must say to protect the backup directory.
+    - The backup includes the Identity tables, so it holds password hashes. The docs must say to protect the backup directory.
   - **`RetentionService`** (Decision 6):
     - Runs daily and sets `Order.Note` and `OrderLine.Note` to null on orders with `CreatedAt` older than `Retention:NoteDays` days (default 30; 0 disables it).
     - Leaves the order, its lines, attribution and audit rows untouched.
@@ -322,12 +358,13 @@ User answers to the Version 1 open questions:
 - Do:
   - Start the app on a real Kestrel port with a temp DB. Use `Seed:DemoData=true`, or create users through `StaffAdminService` or `create-manager`.
   - Flows:
-    - The Manager signs in and creates the Staff user "Anna" and the Kitchen user "Chef" in `/Manager/Staff`.
-    - Anna signs in through the picker and places an order for table 2 with an item note.
+    - The Manager signs in and creates the Staff user "Anna" and the Kitchen user "Chef" in `/Manager/Staff`, reading the setup codes from the page.
+    - Anna and Chef set their own passwords on `/Account/SetPassword`.
+    - Anna places an order for table 2 with an item note.
     - Chef, in a second browser context, sees the card live with "by Anna" and moves it to Ready.
     - Anna gets the "order ready" toast and marks the order Served.
     - "Switch user" on a shared context works.
-    - A deactivated user is signed out within the validation interval (shorten it in the test config).
+    - A deactivated user, and a user whose password was reset, is signed out within the validation interval (shorten it in the test config).
   - Add a CI job that installs the Playwright browsers and runs these tests.
 - Done when: the E2E tests pass locally and in CI.
 - Verify: `dotnet test tests/TableItWeb.E2E`
@@ -340,17 +377,17 @@ User answers to the Version 1 open questions:
 - Do:
   - **README.**
     - Replace the "delete tableit.db / no migrations" text with the migrations workflow (`dotnet tool restore`, `dotnet ef migrations add`).
-    - Document the Development demo users and the PIN `1234`.
+    - Document the Development demo users and their dev-only password `tableit-dev`.
     - Add a "Running in production" section linking to the runbook.
     - Update "Not yet implemented" by removing "Login and staff roles".
   - **docs/operations.md.**
     - First-time setup on the mini PC or NAS: Docker, `.env`, time zone, AllowedHosts, and trusting the Caddy internal root CA on staff phones and tablets.
     - Creating the first Manager (`docker compose run --rm app create-manager`).
-    - Managing staff: create, deactivate, reset a PIN.
-    - Recovering when locked out (`create-manager --reset-pin`).
+    - Managing staff: create an account and hand over the setup code, deactivate, reset a password (new setup code), and how staff change their own password.
+    - Recovering when locked out (`create-manager --reset-password`).
     - Upgrades: back up first, pull the new image, migrations run on start.
     - Backup location and restore steps.
-    - Protecting backups, because they contain PIN hashes and staff names.
+    - Protecting backups, because they contain password hashes and staff names.
     - Note retention (30 days, configurable).
     - Checking `/healthz` and the logs.
     - A mid-service recovery checklist.
@@ -365,7 +402,8 @@ User answers to the Version 1 open questions:
 - Files: none (read-only)
 - Do: Review the full diff against main for:
   - **Authorization.** Every controller action, the hub and every page has a policy, and the anonymous surface is only Account, Error, `/healthz` and static files.
-  - **Identity configuration.** PIN policy, lockout, the login rate limit, the security stamp interval, and inactive users blocked.
+  - **Identity configuration.** Password policy (8-character minimum, no composition rules), lockout, the login and set-password rate limits, the security stamp interval, and inactive users blocked.
+  - **Setup codes.** Hashed at rest, single use, expire after 24 hours, constant-time comparison, generic errors, and failed attempts counted toward lockout.
   - **Cookies and secrets.** Cookie flags and SameSite (CSRF), Data Protection key persistence, and no default or hard-coded credentials outside the Development seed.
   - **`create-manager`.** The guard rails and exit codes.
   - **Staff administration.** The last-Manager guard.
@@ -400,7 +438,7 @@ Exact edges: T7←T6; T8←T7; T9←T7; T11←T7; T10←T6,T9; T13←T7,T9; T12�
 ```mermaid
 flowchart LR
   T6["T6 Identity + attribution schema"] --> T7["T7 Identity services + bootstrap CLI"]
-  T7 --> T8["T8 Login / switch user pages"]
+  T7 --> T8["T8 Login / set + change password pages"]
   T7 --> T9["T9 Enforce authorization"]
   T7 --> T11["T11 Staff management page"]
   T6 --> T10["T10 Order attribution + status audit"]
@@ -431,11 +469,11 @@ flowchart LR
 ```
 
 ## Execution waves
-T1–T5 are done (PR #8). Waves continue from there.
+T1–T5 are done (PR #8). Wave 1 (T6) starts only after PR #8 is merged into main, and T6 onwards branch from main.
 
 | Wave | Tasks (run in parallel) | Waits for |
 |------|-------------------------|-----------|
-| 1    | T6                      | PR #8 base |
+| 1    | T6                      | PR #8 merged into main |
 | 2    | T7                      | T6        |
 | 3    | T8, T9, T11             | T7        |
 | 4    | T10, T12, T13           | T9, T8, T11 |
@@ -466,11 +504,11 @@ File-ownership check:
 ## Risks
 - **Identity grows the schema and changes the auth surface at once.** T6 isolates the schema (one migration, no behaviour change). T7 wires services without enforcing anything, so the existing suite stays green. T9 enforces, so any test breakage is concentrated in one task that owns the test infrastructure.
 - **`TableItDbContext` must call `base.OnModelCreating`** after the switch to `IdentityDbContext`, or the Identity keys are missing and the migration is wrong. T6 must do this, and `MigrationTests` plus the T20 review check it.
-- **Short PINs are weak secrets.** This is mitigated by Identity lockout, the per-IP login rate limit, LAN-only exposure over HTTPS, and a configurable minimum length (open question 3). Deactivation and PIN reset take effect within the 1-minute security stamp interval.
-- **Lock-out of all Managers.** This is covered by the last-Manager guard in T11 and the `create-manager --reset-pin` recovery path in T7, documented in T19.
+- **Revocation delay.** Deactivation and password reset take effect within the 1-minute security stamp interval, not instantly.
+- **Setup codes are bearer secrets for 24 hours.** They are stored hashed, single use, replaced when a new one is issued, and protected by lockout and the rate limit. Managers should hand them over in person.
+- **All Managers locked out.** This is covered by the last-Manager guard in T11 and the `create-manager --reset-password` recovery path in T7, documented in T19.
 - **Data Protection keys not persisted in Docker** would sign everyone out on every container restart. T7 adds `DataProtection:KeysPath`, and T15 mounts it on the `/data` volume.
-- **The user picker reveals staff display names before sign-in.** That is acceptable on a LAN-only HTTPS deployment, and it can be turned off (open question 1).
 - **The Caddy internal CA must be trusted on every phone and tablet,** or browsers show warnings and the Secure cookie or the WebSocket may fail. T19 documents installing the root certificate. A real domain with a DNS challenge avoids this.
-- **Backups contain PIN hashes and staff names.** T14 and T19 call for protecting the backup directory.
+- **Backups contain password hashes and staff names.** T14 and T19 call for protecting the backup directory.
 - **The CSP could break the pages.** T13 allows inline styles and `ws:`/`wss:`, and the T18 browser tests catch regressions.
-- **PR #8 is not merged yet.** If review changes T1–T5, rebase T6 onward. T6 is the only task that depends on the exact schema snapshot, so regenerate its migration if `InitialCreate` changes.
+- **PR #8 must merge first.** Work waits for it, and if review changes T1–T5, the plan picks that up from main. T6 is the only task that depends on the exact schema snapshot, so regenerate its migration if `InitialCreate` changes.
